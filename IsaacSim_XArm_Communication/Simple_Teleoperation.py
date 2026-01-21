@@ -2,7 +2,9 @@
 import socket
 import json
 import time
-import math
+import sys
+import select
+import msvcrt
 from xarm import Controller
 
 class SimpleXArmCalibrator:
@@ -10,7 +12,6 @@ class SimpleXArmCalibrator:
         # Connection to Isaac Sim
         self.sim_sender = None
         self.calibration_receiver = None
-        
         # Calibration data
         self.sim_current_pos = None
         self.last_sim_update = 0
@@ -65,23 +66,37 @@ class SimpleXArmCalibrator:
                 time.sleep(0.1)
     
     def send_xarm_angles(self, angles_deg):
+        # if self.sim_sender:
+        #     try:
+        #         # Test joint 1 only
+        #         test_angles = [0, 0, 0, 0, 0, 0]
+        #         test_angles[0] = angles_deg[0]  # Only send base
+                
+        #         message = {
+        #             'joints': test_angles,
+        #             'timestamp': time.time()
+        #         }
+                
+        #         self.sim_sender.sendall(json.dumps(message).encode('utf-8'))
+        #         print(f"DEBUG: Sent only base: {angles_deg[0]}")
+        #         return True
+        #     except Exception as e:
+        #         print(f"Error sending angles: {e}")
+        #         return False
+        # return False
         """Send xArm angles to Isaac Sim"""
         if self.sim_sender:
             try:
-                # Simple message format
-                fixed_angles = angles_deg.copy()
-                fixed_angles[2] = -fixed_angles[2]
-
-                reversed_fixed_angles = fixed_angles[::-1]
-
+                # Test: send raw reversed without any sign changes
+                reversed_angles = angles_deg[::-1]
+                
                 message = {
-                    'joints': reversed_fixed_angles,
+                    'joints': reversed_angles,
                     'timestamp': time.time()
                 }
                 
                 self.sim_sender.sendall(json.dumps(message).encode('utf-8'))
                 return True
-                
             except Exception as e:
                 print(f"Error sending angles: {e}")
                 return False
@@ -114,19 +129,34 @@ def main():
     # Setup XArm
     print("Connecting to xArm...")
     arm = Controller('USB')
+
+    print("Getting XArm current positions")
+    xarm_start_positions = []
+    for i in range(1,7):
+        pos = arm.getPosition(i, False)
+        angle_deg = (pos - 500) * 0.25
+        xarm_start_positions.append(angle_deg)
+        print(f"xArm starting positions: {[round(a, 1) for a in xarm_start_positions]}°")
+
     time.sleep(1)
-    
-    # Calibration data
-    calibration_offsets = None
-    prev_angles = [0.0] * 6
-    last_calibration_time = 0
+    prev_angles = xarm_start_positions[:]
     
     print("Starting teleoperation...")
     print("Move the xArm to see it in Isaac Sim!")
     print("Press Ctrl+C to stop")
     
+    calibration_offsets = None
     try:
         while True:
+
+            if msvcrt.kbhit():  # Check if key pressed
+                key = msvcrt.getch()
+                if key == b' ' and calibrator.sim_current_pos:
+                    offsets = calibrator.calculate_calibration_offset(xarm_start_positions, calibrator.sim_current_pos)
+                    if offsets:
+                        calibration_offsets = offsets
+                        print(f"CALIBRATED! Offsets: {[round(o, 1) for o in offsets]}")
+           
             # Read XArm angles
             curr_angles = []
             for i in range(1, 7):
@@ -140,30 +170,18 @@ def main():
             # Check if position changed
             changed = any(abs(p - c) > 0.3 for p, c in zip(prev_angles, curr_angles))
             
-            # Update calibration every 5 seconds if we have simulator data
-            current_time = time.time()
-            if (calibrator.sim_current_pos and 
-                current_time - last_calibration_time > 5.0):
-                
-                offsets = calibrator.calculate_calibration_offset(curr_angles, calibrator.sim_current_pos)
-                if offsets:
-                    calibration_offsets = offsets
-                    print(f"Updated calibration offsets: {offsets}")
-                    last_calibration_time = current_time
-            
-            # Apply calibration if available
-            if calibration_offsets:
-                calibrated_angles = calibrator.apply_calibration(curr_angles, calibration_offsets)
-            else:
-                calibrated_angles = curr_angles
-            
             # Send to Isaac Sim
             if changed:
+                if calibration_offsets:
+                    # Apply fixed calibration offsets
+                    calibrated_angles = calibrator.apply_calibration(curr_angles, calibration_offsets)
+                else:
+                    calibrated_angles = curr_angles
+                
                 success = calibrator.send_xarm_angles(calibrated_angles)
                 if success:
-                    print(f"Sent: {[round(a, 1) for a in calibrated_angles]}")
-            
-            prev_angles = curr_angles[:]
+                    print(f"Sent: {[round(a, 1) for a in curr_angles]}")
+
             time.sleep(0.033)  # ~30Hz
             
     except KeyboardInterrupt:
