@@ -1,4 +1,5 @@
-from xarm import Controller
+from xarm import Controller, Servo  
+import hid
 import time
 
 arm = Controller('USB')
