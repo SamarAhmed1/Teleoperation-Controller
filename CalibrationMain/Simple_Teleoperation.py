@@ -3,7 +3,7 @@ import socket
 import json
 import time
 
-class SimpleXArmCalibrator:
+class TeleoperationConnection:
     def __init__(self):
         # Connection to Isaac Sim
         self.sim_sender = None
@@ -11,6 +11,7 @@ class SimpleXArmCalibrator:
         # Calibration data
         self.sim_current_pos = None
         self.last_sim_update = 0
+        
         
     def connect_to_simulator(self, send_port=12345, receive_port=12346):
         """Connect to Isaac Sim for sending and receiving data"""
@@ -20,22 +21,27 @@ class SimpleXArmCalibrator:
             self.sim_sender.connect(('localhost', send_port))
             print(f"Connected to Isaac Sim (send) on port {send_port}")
             
-            # Connect to receive calibration data FROM Isaac Sim
-            self.calibration_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.calibration_receiver.connect(('localhost', receive_port))
-            print(f"Connected to Isaac Sim (receive) on port {receive_port}")
-            
-            # Start thread to receive calibration data
-            import threading
-            self.receive_thread = threading.Thread(target=self._receive_calibration_data, daemon=True)
-            self.receive_thread.start()
+            # Try to connect to receive calibration data FROM Isaac Sim
+            try:
+                self.calibration_receiver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.calibration_receiver.connect(('localhost', receive_port))
+                print(f"Connected to Isaac Sim (receive) on port {receive_port}")
+                
+                # Start thread to receive calibration data
+                import threading
+                self.receive_thread = threading.Thread(target=self._receive_calibration_data, daemon=True)
+                self.receive_thread.start()
+                
+            except ConnectionRefusedError:
+                print(f"Note: Isaac Sim not listening on port {receive_port} (teleoperation only)")
+                self.calibration_receiver = None
             
             return True
             
         except ConnectionRefusedError:
-            print(f"Could not connect to Isaac Sim. Make sure it's running.")
+            print(f"Could not connect to Isaac Sim on port {send_port}. Make sure it's running.")
             return False
-    
+
     def _receive_calibration_data(self):
         """Receive calibration data from Isaac Sim"""
         while True:
@@ -47,7 +53,8 @@ class SimpleXArmCalibrator:
                     if msg.get('type') == 'isaac_position':
                         joints_rad = msg.get('joints_rad', [])
                         joints_deg = msg.get('joints_deg', [])
-                        
+                        print(f"DEBUG RAW RECEIVED: joints_deg = {joints_deg}")
+
                         # Update current simulator position
                         self.sim_current_pos = joints_deg
                         self.last_sim_update = time.time()
@@ -60,55 +67,3 @@ class SimpleXArmCalibrator:
                 time.sleep(0.1)
             except Exception as e:
                 time.sleep(0.1)
-    
-    def send_xarm_angles(self, angles_deg):
-        # if self.sim_sender:
-        #     try:
-        #         # Test joint 1 only
-        #         test_angles = [0, 0, 0, 0, 0, 0]
-        #         test_angles[0] = angles_deg[0]  # Only send base
-                
-        #         message = {
-        #             'joints': test_angles,
-        #             'timestamp': time.time()
-        #         }
-                
-        #         self.sim_sender.sendall(json.dumps(message).encode('utf-8'))
-        #         print(f"DEBUG: Sent only base: {angles_deg[0]}")
-        #         return True
-        #     except Exception as e:
-        #         print(f"Error sending angles: {e}")
-        #         return False
-        # return False
-        """Send xArm angles to Isaac Sim"""
-        if self.sim_sender:
-            try:
-                # Test: send raw reversed without any sign changes
-                reversed_angles = angles_deg[::-1]
-                
-                message = {
-                    'joints': reversed_angles,
-                    'timestamp': time.time()
-                }
-                
-                self.sim_sender.sendall(json.dumps(message).encode('utf-8'))
-                return True
-            except Exception as e:
-                print(f"Error sending angles: {e}")
-                return False
-        return False
-    
-    def calculate_calibration_offset(self, xarm_angles, sim_angles):
-        """Calculate the offset between xArm and simulator positions"""
-        if len(xarm_angles) != 6 or len(sim_angles) != 6:
-            return None
-            
-        # Simple offset calculation
-        offsets = [sim - xarm for xarm, sim in zip(xarm_angles, sim_angles)]
-        return offsets
-    
-    def apply_calibration(self, xarm_angles, offsets):
-        """Apply calibration offsets to xArm angles"""
-        if offsets and len(offsets) == 6:
-            return [xarm + offset for xarm, offset in zip(xarm_angles, offsets)]
-        return xarm_angles
