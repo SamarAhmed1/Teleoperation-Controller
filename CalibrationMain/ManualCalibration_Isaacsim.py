@@ -38,14 +38,13 @@ class SimpleXArmCalibrator:
         """Clamp angle to xArm physical limits"""
         min_angle, max_angle = XARM_JOINT_LIMITS[servo_id]
         return max(min_angle, min(max_angle, angle_deg))
-
     def connect_to_simulator(self, send_port=12345, receive_port=12346):
         """Connect to Isaac Sim for sending and receiving data"""
         try:
             # Connect to send joint angles TO Isaac Sim
             self.sim_sender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sim_sender.connect(('localhost', send_port))
-            print(f"Connected to send on port {send_port}")
+            print(f"Connected to Isaac Sim (send) on port {send_port}")
             
             # Try to connect to receive calibration data FROM Isaac Sim
             try:
@@ -65,7 +64,7 @@ class SimpleXArmCalibrator:
             return True
             
         except ConnectionRefusedError:
-            print(f"Could not connect to GUI on port {send_port}. Make sure it's running.")
+            print(f"Could not connect to Isaac Sim on port {send_port}. Make sure it's running.")
             return False
 
     def _receive_calibration_data(self):
@@ -129,12 +128,12 @@ class SimpleXArmCalibrator:
                 # When UR10e is at [0,0,0,0,0,0], xArm needs to be at these angles
                 # So: UR10e_angle = xArm_visual_angle - kinematic_offset
                 kinematic_offsets = {
-                    1: 27.1,   # Gripper
-                    2: -107.1,  # Wrist2  
-                    3: 91.3,   # Wrist1
-                    4: -3.0,   # Elbow
-                    5: 86.0,   # Shoulder
-                    6: 3.2,    # Base
+                    1: 11.0,   # Gripper: xArm at 11° = UR10e at 0°
+                    2: -94.0,  # Wrist2: xArm at -94° = UR10e at 0°
+                    3: 77.0,   # Wrist1: xArm at 77° = UR10e at 0°
+                    4: -5.2,   # Elbow: xArm at -5.2° = UR10e at 0°
+                    5: 89.0,   # Shoulder: xArm at 89° = UR10e at 0°
+                    6: 0.2,    # Base: xArm at 0.2° = UR10e at 0°
                 }
                 
                 # Apply kinematic offsets
@@ -153,12 +152,10 @@ class SimpleXArmCalibrator:
                         visual_angle = self.clamp_to_xarm_limits(servo_id, visual_angle)
                         print(f"         Using clamped value: {visual_angle:.1f}°")
                     
-                    # if servo_id == 3:
-                    #     ur10e_angle = -(visual_angle - kinematic_offset)
-                    # elif servo_id == 5:
-                    #     ur10e_angle = -(visual_angle - kinematic_offset)
-                    #else:
-                    ur10e_angle = visual_angle - kinematic_offset
+                    if servo_id == 4:
+                        ur10e_angle = -(visual_angle - kinematic_offset)
+                    else:
+                        ur10e_angle = visual_angle - kinematic_offset
                     ur10e_reference_angles.append(ur10e_angle)
                     
                     print(f"  ID{servo_id}: {visual_angle:6.1f}° - kinematic {kinematic_offset:6.1f}° = {ur10e_angle:6.1f}°")
@@ -217,12 +214,12 @@ class SimpleXArmCalibrator:
             ur10e_target_angle = ur10e_pose_deg[i]
             # REVERSE LOGIC: UR10e angle → xArm visual angle
             kinematic_offsets = {
-                1: 27.1,   # Gripper
-                2: -107.1,  # Wrist2  
-                3: 91.3,   # Wrist1
-                4: -3.0,   # Elbow
-                5: 86.0,   # Shoulder
-                6: 3.2,    # Base
+                1: 11.0,   # Gripper
+                2: -94.0,  # Wrist2  
+                3: 77.0,   # Wrist1
+                4: -5.2,   # Elbow
+                5: 89.0,   # Shoulder
+                6: 0.2,    # Base
             }
             
             # Step 1: Add kinematic offset
